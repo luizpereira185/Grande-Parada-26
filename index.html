@@ -744,5 +744,88 @@ popularSelects();
 renderLista();
 atualizarTudo();
 </script>
-</body>
+
+<!-- COLE ESTE BLOCO NO index.html, logo ANTES de </body> (depois do <script> principal).
+     Não precisa alterar mais nada no código existente. -->
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-app.js";
+import { getFirestore, collection, doc, setDoc, onSnapshot, serverTimestamp }
+  from "https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyCak5Xf4cBJu4oYiwCdqdH38yD2pYsseGY",
+  authDomain: "app-grande-parada.firebaseapp.com",
+  projectId: "app-grande-parada",
+  storageBucket: "app-grande-parada.firebasestorage.app",
+  messagingSenderId: "14079799224",
+  appId: "1:14079799224:web:7a0e4ee913cf47af5ee94d"
+};
+
+const db = getFirestore(initializeApp(firebaseConfig));
+const COL = "atividades";
+
+const snap = a => JSON.stringify({pct:a.pct, obs:a.obs, acao:a.acao, foto:a.foto});
+const ult = {};                                   // último estado sincronizado de cada atividade
+atividades.forEach(a => ult[a.id] = snap(a));
+
+const status = document.createElement('span');
+document.querySelector('.sub').appendChild(status);
+const setStatus = t => status.textContent = ' · ' + t;
+setStatus('conectando...');
+
+// ---- ENVIAR: mantém o salvar() original (localStorage) e acrescenta o envio ao Firestore
+const salvarLocal = window.salvar;
+let timer = null;
+window.salvar = function(){
+  salvarLocal();
+  clearTimeout(timer);
+  timer = setTimeout(enviar, 700);                // agrupa os movimentos do slider/digitação
+};
+function enviar(){
+  atividades.forEach(a => {
+    const s = snap(a);
+    if (s === ult[a.id]) return;
+    ult[a.id] = s;
+    setDoc(doc(db, COL, String(a.id)), {
+      pct:a.pct, obs:a.obs, acao:a.acao, foto:a.foto,
+      lider:a.lider, setor:a.setor, dia:a.dia,
+      atualizadoEm: serverTimestamp()
+    }, {merge:true}).catch(e => { ult[a.id] = null; console.error(e); setStatus('⚠️ erro ao salvar na nuvem'); });
+  });
+}
+
+// ---- RECEBER: atualiza a tela em tempo real quando outra pessoa altera algo
+onSnapshot(collection(db, COL), qs => {
+  let mudou = false, fotoMudou = false;
+  qs.docChanges().forEach(ch => {
+    if (ch.doc.metadata.hasPendingWrites) return; // alteração feita por este próprio aparelho
+    const a = atividades.find(x => x.id === +ch.doc.id);
+    if (!a) return;
+    const d = ch.doc.data();
+    const novo = {pct:d.pct||0, obs:d.obs||'', acao:d.acao||'', foto:d.foto||null};
+    if (JSON.stringify(novo) === ult[a.id]) return;
+    if (novo.foto !== a.foto) fotoMudou = true;
+    Object.assign(a, novo);
+    ult[a.id] = snap(a);
+    mudou = true;
+
+    const row = document.querySelector(`.row[data-id="${a.id}"]`);
+    if (row){
+      row.querySelector('input[type=range]').value = a.pct;
+      row.querySelector('.pct').textContent = a.pct + '%';
+      const o = row.querySelector('[data-obsid]'), c = row.querySelector('[data-acaoid]');
+      if (o !== document.activeElement) o.value = a.obs;
+      if (c !== document.activeElement) c.value = a.acao;
+    }
+  });
+  if (mudou){
+    salvarLocal();
+    atualizarTudo();
+    if (fotoMudou && !(document.activeElement && document.activeElement.matches('.obs'))) renderLista();
+  }
+  setStatus('☁️ sincronizado');
+}, err => { console.error(err); setStatus('⚠️ sem conexão com a nuvem (salvando só neste aparelho)'); });
+</script>
+
+  </body>
 </html>
